@@ -433,6 +433,34 @@ def test_get_named_custom_provider_finds_user_providers_by_key(monkeypatch, tmp_
     assert result["name"] == "Local (localhost:11434)"
 
 
+def test_get_named_custom_provider_resolves_lantern_profile_env(monkeypatch, tmp_path):
+    """Lantern profile uses providers: dict + key_env + default_model."""
+    config = {
+        "providers": {
+            "lantern": {
+                "base_url": "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1",
+                "key_env": "LANTERN_BRIDGE_TOKEN",
+                "name": "Lantern Kernel Bridge",
+                "default_model": "lantern-auto",
+            }
+        }
+    }
+
+    import yaml
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.dump(config))
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("LANTERN_BRIDGE_TOKEN", "bridge-secret")
+
+    result = rp._get_named_custom_provider("lantern")
+
+    assert result is not None
+    assert result["base_url"] == "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1"
+    assert result["api_key"] == "bridge-secret"
+    assert result["model"] == "lantern-auto"
+
+
 def test_get_named_custom_provider_finds_by_display_name(monkeypatch, tmp_path):
     """Should match providers by their 'name' field as well as key."""
     config = {

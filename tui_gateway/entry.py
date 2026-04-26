@@ -9,6 +9,18 @@ from tui_gateway import server
 from tui_gateway.server import _CRASH_LOG, dispatch, resolve_skin, write_json
 from tui_gateway.transport import TeeTransport
 
+GATEWAY_PROTOCOL_VERSION = "2026-04-26"
+GATEWAY_CAPABILITIES = {
+    "lantern_agent_plane": {
+        "ready_metadata": True,
+        "bridge_env": [
+            "LANTERN_BRIDGE_PORT",
+            "LANTERN_BRIDGE_TOKEN",
+            "LANTERN_BRIDGE_AUDIENCE",
+        ],
+    }
+}
+
 
 def _install_sidecar_publisher() -> None:
     """Mirror every dispatcher emit to the dashboard sidebar via WS.
@@ -108,7 +120,14 @@ def main():
     if not write_json({
         "jsonrpc": "2.0",
         "method": "event",
-        "params": {"type": "gateway.ready", "payload": {"skin": resolve_skin()}},
+        "params": {
+            "type": "gateway.ready",
+            "payload": {
+                "skin": resolve_skin(),
+                "protocol_version": GATEWAY_PROTOCOL_VERSION,
+                "capabilities": GATEWAY_CAPABILITIES,
+            },
+        },
     }):
         _log_exit("startup write failed (broken stdout pipe before first event)")
         sys.exit(0)

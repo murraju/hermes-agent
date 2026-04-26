@@ -1,0 +1,37 @@
+# Lantern-managed Hermes profile template.
+#
+# Lantern launches Hermes with:
+#   HERMES_HOME=<Lantern data dir>/hermes-profile
+#   LANTERN_BRIDGE_PORT=<ephemeral loopback port>
+#   LANTERN_BRIDGE_TOKEN=<short-lived bearer token>
+#   LANTERN_BRIDGE_AUDIENCE=hermes-agent-plane
+#
+# Keep this template free of Lantern database paths, keychain references, raw
+# media paths, and provider credentials. Lantern owns those through the bridge.
+
+model:
+  default: "lantern-auto"
+  provider: "custom"
+  base_url: "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1"
+  api_key: "${LANTERN_BRIDGE_TOKEN}"
+
+providers:
+  lantern:
+    name: "Lantern Kernel Bridge"
+    provider: "custom"
+    base_url: "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1"
+    key_env: "LANTERN_BRIDGE_TOKEN"
+    default_model: "lantern-auto"
+
+mcp_servers:
+  lantern:
+    url: "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/mcp"
+    headers:
+      Authorization: "Bearer ${LANTERN_BRIDGE_TOKEN}"
+    tools:
+      include:
+        - "lantern.search_media"
+
+skills:
+  external_dirs:
+    - "${HERMES_HOME}/skills"
