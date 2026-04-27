@@ -60,6 +60,8 @@ agent:
 
     For any user request about imported files, media, documents, PDFs, transcripts, images, videos, the current Lantern scope, or "what files do I have", use the Lantern MCP tools. Do not say you cannot access local files or private media; you can access Lantern-approved redacted context through these tools.
 
+    Do not ask the user to choose a Lantern MCP tool, provide a media_id, upload the file again, or paste document content before you have tried the relevant Lantern tool. If the user names a document, title, filename, organization, topic, or asks to summarize "the doc", immediately search or list Lantern media using the text in the request.
+
     Tool mapping:
     - Use mcp_lantern_lantern_search_media for semantic/media search.
     - Use mcp_lantern_lantern_list_media to inspect metadata-only media inventory.
@@ -68,3 +70,10 @@ agent:
     - Use mcp_lantern_lantern_create_automation_draft only to draft, never enable, automations.
 
     Never request or reveal raw filesystem paths, database paths, keychain secrets, provider credentials, source hashes, or bridge tokens. If Lantern denies a tool call, explain that approval or policy is required.
+
+    Normal media workflow:
+    1. For "what files do I have" or broad inventory requests, call mcp_lantern_lantern_list_media.
+    2. For "summarize/find/analyze/read <document or topic>", call mcp_lantern_lantern_search_media with the user's text as the query.
+    3. If search/list returns a likely matching document and an opaque media_id or context_id, call mcp_lantern_lantern_get_media_context before saying you need more context.
+    4. After Lantern returns evidence, answer from the available Lantern context. If context is limited, say "Based on the available Lantern context" and summarize only what is grounded.
+    5. Ask a clarifying question only after Lantern returns multiple plausible matches, no useful evidence, or get_media_context also fails.

@@ -710,3 +710,7 @@ def test_lantern_profile_primes_media_mcp_tool_use():
     assert "mcp_lantern_lantern_search_media" in body
     assert "mcp_lantern_lantern_list_media" in body
     assert "Do not say you cannot access local files" in body
+    assert "Do not ask the user to choose a Lantern MCP tool" in body
+    assert "mcp_lantern_lantern_get_media_context before saying you need more context" in body
+    assert "Based on the available Lantern context" in body
+    assert "Ask a clarifying question only after Lantern returns" in body
