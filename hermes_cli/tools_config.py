@@ -101,6 +101,24 @@ def _toolset_allowed_for_platform(ts_key: str, platform: str) -> bool:
     return allowed is None or platform in allowed
 
 
+def _lantern_managed_cli(platform: str) -> bool:
+    """Lantern embeds Hermes as a managed agent plane for the CLI/TUI.
+
+    In that mode Lantern owns private data access through its MCP bridge and
+    intentionally does not expose raw local terminal/file/browser/provider
+    toolsets from the `/tools` flow.
+    """
+    return platform == "cli" and is_truthy_value(os.getenv("HERMES_LANTERN_MANAGED"))
+
+
+def _lantern_managed_toolsets(config: dict) -> Set[str]:
+    mcp_servers = config.get("mcp_servers") or {}
+    lantern_cfg = mcp_servers.get("lantern")
+    if isinstance(lantern_cfg, dict) and _parse_enabled_flag(lantern_cfg.get("enabled", True), default=True):
+        return {"lantern"}
+    return set()
+
+
 def _get_effective_configurable_toolsets():
     """Return CONFIGURABLE_TOOLSETS + any plugin-provided toolsets.
 
@@ -628,6 +646,9 @@ def _get_platform_tools(
     """Resolve which individual toolset names are enabled for a platform."""
     from toolsets import resolve_toolset, TOOLSETS
 
+    if _lantern_managed_cli(platform):
+        return _lantern_managed_toolsets(config)
+
     platform_toolsets = config.get("platform_toolsets") or {}
     toolset_names = platform_toolsets.get(platform)
 
@@ -787,6 +808,11 @@ def _save_platform_tools(config: dict, platform: str, enabled_toolset_keys: Set[
     that were already in the config for this platform.
     """
     config.setdefault("platform_toolsets", {})
+
+    if _lantern_managed_cli(platform):
+        config["platform_toolsets"][platform] = sorted(_lantern_managed_toolsets(config))
+        save_config(config)
+        return
 
     # Drop platform-scoped toolsets that don't apply here.  Prevents the
     # "Configure all platforms" checklist (or a hand-edited config.yaml)

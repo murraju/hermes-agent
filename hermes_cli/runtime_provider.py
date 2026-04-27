@@ -384,7 +384,7 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
                         "name": entry.get("name", ep_name),
                         "base_url": base_url.strip(),
                         "api_key": resolved_api_key,
-                        "model": entry.get("default_model", ""),
+                        "model": entry.get("model") or entry.get("default_model", ""),
                     }
                     api_mode = _parse_api_mode(entry.get("api_mode"))
                     if api_mode:
@@ -402,7 +402,7 @@ def _get_named_custom_provider(requested_provider: str) -> Optional[Dict[str, An
                             "name": display_name,
                             "base_url": base_url.strip(),
                             "api_key": resolved_api_key,
-                            "model": entry.get("default_model", ""),
+                            "model": entry.get("model") or entry.get("default_model", ""),
                         }
                         api_mode = _parse_api_mode(entry.get("api_mode"))
                         if api_mode:
@@ -475,23 +475,34 @@ def _resolve_named_custom_runtime(
     if not base_url:
         return None
 
-    # Check if a credential pool exists for this custom endpoint
-    pool_result = _try_resolve_from_custom_pool(base_url, "custom", custom_provider.get("api_mode"))
-    if pool_result:
-        # Propagate the model name even when using pooled credentials —
-        # the pool doesn't know about the custom_providers model field.
-        model_name = custom_provider.get("model")
-        if model_name:
-            pool_result["model"] = model_name
-        return pool_result
+    lantern_managed = _is_lantern_managed_provider(requested_provider, custom_provider, base_url)
+    if not lantern_managed:
+        # Check if a credential pool exists for this custom endpoint. Lantern is
+        # deliberately excluded because its bridge token is ephemeral and owned
+        # by the embedding host process; pooling stale bridge tokens causes 401s.
+        pool_result = _try_resolve_from_custom_pool(
+            base_url, "custom", custom_provider.get("api_mode")
+        )
+        if pool_result:
+            # Propagate the model name even when using pooled credentials —
+            # the pool doesn't know about the custom_providers model field.
+            model_name = custom_provider.get("model")
+            if model_name:
+                pool_result["model"] = model_name
+            return pool_result
 
     api_key_candidates = [
         (explicit_api_key or "").strip(),
         str(custom_provider.get("api_key", "") or "").strip(),
         os.getenv(str(custom_provider.get("key_env", "") or "").strip(), "").strip(),
-        os.getenv("OPENAI_API_KEY", "").strip(),
-        os.getenv("OPENROUTER_API_KEY", "").strip(),
     ]
+    if not lantern_managed:
+        api_key_candidates.extend(
+            [
+                os.getenv("OPENAI_API_KEY", "").strip(),
+                os.getenv("OPENROUTER_API_KEY", "").strip(),
+            ]
+        )
     api_key = next((candidate for candidate in api_key_candidates if has_usable_secret(candidate)), "")
 
     result = {
@@ -508,6 +519,29 @@ def _resolve_named_custom_runtime(
     if custom_provider.get("model"):
         result["model"] = custom_provider["model"]
     return result
+
+
+def _is_lantern_managed_provider(
+    requested_provider: str,
+    custom_provider: Dict[str, Any],
+    base_url: str,
+) -> bool:
+    if os.getenv("HERMES_LANTERN_MANAGED", "").strip() != "1":
+        return False
+    requested = (requested_provider or "").strip().lower()
+    key_env = str(custom_provider.get("key_env", "") or "").strip()
+    model = str(custom_provider.get("model", "") or "").strip()
+    name = str(custom_provider.get("name", "") or "").strip().lower()
+    provider_key = str(custom_provider.get("provider_key", "") or "").strip().lower()
+    return (
+        requested == "lantern"
+        or provider_key == "lantern"
+        or key_env == "LANTERN_BRIDGE_TOKEN"
+        or model == "lantern-auto"
+        or name.startswith("lantern")
+        or "127.0.0.1" in base_url
+        and os.getenv("LANTERN_BRIDGE_PORT", "").strip() in base_url
+    )
 
 
 def _resolve_openrouter_runtime(

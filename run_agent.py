@@ -66,6 +66,35 @@ else:
     logger.info("No .env file found. Using system environment variables.")
 
 
+LANTERN_MANAGED_MINIMUM_CONTEXT_LENGTH = 32_768
+
+
+def _is_lantern_managed_runtime(model: str = "", provider: str = "", base_url: str = "") -> bool:
+    """Return true when Hermes is running as Lantern's managed agent plane."""
+    if os.getenv("HERMES_LANTERN_MANAGED", "").strip() != "1":
+        return False
+    model_id = (model or "").strip()
+    provider_id = (provider or "").strip().lower()
+    bridge_port = os.getenv("LANTERN_BRIDGE_PORT", "").strip()
+    return (
+        model_id == "lantern-auto"
+        or provider_id == "lantern"
+        or provider_id == "custom" and model_id == "lantern-auto"
+        or "127.0.0.1" in (base_url or "") and bridge_port and bridge_port in base_url
+    )
+
+
+def _minimum_context_length_for_runtime(
+    model: str = "",
+    provider: str = "",
+    base_url: str = "",
+) -> int:
+    if _is_lantern_managed_runtime(model=model, provider=provider, base_url=base_url):
+        return LANTERN_MANAGED_MINIMUM_CONTEXT_LENGTH
+    from agent.model_metadata import MINIMUM_CONTEXT_LENGTH
+    return MINIMUM_CONTEXT_LENGTH
+
+
 # Import our tool system
 from model_tools import (
     get_tool_definitions,
@@ -1926,15 +1955,21 @@ class AIAgent:
         self.compression_enabled = compression_enabled
 
         # Reject models whose context window is below the minimum required
-        # for reliable tool-calling workflows (64K tokens).
-        from agent.model_metadata import MINIMUM_CONTEXT_LENGTH
+        # for reliable tool-calling workflows. Lantern-managed mode is allowed
+        # to run at Lantern's actual local model cap because Lantern owns the
+        # runtime, routing, context policy, and MCP tool surface.
+        minimum_context_length = _minimum_context_length_for_runtime(
+            model=self.model,
+            provider=self.provider,
+            base_url=self.base_url,
+        )
         _ctx = getattr(self.context_compressor, "context_length", 0)
-        if _ctx and _ctx < MINIMUM_CONTEXT_LENGTH:
+        if _ctx and _ctx < minimum_context_length:
             raise ValueError(
                 f"Model {self.model} has a context window of {_ctx:,} tokens, "
-                f"which is below the minimum {MINIMUM_CONTEXT_LENGTH:,} required "
+                f"which is below the minimum {minimum_context_length:,} required "
                 f"by Hermes Agent.  Choose a model with at least "
-                f"{MINIMUM_CONTEXT_LENGTH // 1000}K context, or set "
+                f"{minimum_context_length // 1000}K context, or set "
                 f"model.context_length in config.yaml to override."
             )
 
@@ -2425,7 +2460,6 @@ class AIAgent:
         try:
             from agent.auxiliary_client import get_text_auxiliary_client
             from agent.model_metadata import (
-                MINIMUM_CONTEXT_LENGTH,
                 get_model_context_length,
             )
 
@@ -2458,19 +2492,22 @@ class AIAgent:
                 provider=getattr(self, "provider", ""),
             )
 
-            # Hard floor: the auxiliary compression model must have at least
-            # MINIMUM_CONTEXT_LENGTH (64K) tokens of context.  The main model
-            # is already required to meet this floor (checked earlier in
-            # __init__), so the compression model must too — otherwise it
-            # cannot summarise a full threshold-sized window of main-model
-            # content.  Mirrors the main-model rejection pattern.
-            if aux_context and aux_context < MINIMUM_CONTEXT_LENGTH:
+            # Hard floor: the auxiliary compression model must have enough
+            # context to summarise the main model window. Lantern-managed mode
+            # uses Lantern's real local context cap instead of Hermes' default
+            # cloud-oriented 64K floor.
+            minimum_context_length = _minimum_context_length_for_runtime(
+                model=aux_model,
+                provider=getattr(self, "provider", ""),
+                base_url=aux_base_url,
+            )
+            if aux_context and aux_context < minimum_context_length:
                 raise ValueError(
                     f"Auxiliary compression model {aux_model} has a context "
                     f"window of {aux_context:,} tokens, which is below the "
-                    f"minimum {MINIMUM_CONTEXT_LENGTH:,} required by Hermes "
+                    f"minimum {minimum_context_length:,} required by Hermes "
                     f"Agent.  Choose a compression model with at least "
-                    f"{MINIMUM_CONTEXT_LENGTH // 1000}K context (set "
+                    f"{minimum_context_length // 1000}K context (set "
                     f"auxiliary.compression.model in config.yaml), or set "
                     f"auxiliary.compression.context_length to override the "
                     f"detected value if it is wrong."
