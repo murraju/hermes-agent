@@ -11,6 +11,12 @@ videos, or other private content imported into Lantern.
 ## Rules
 
 - Use `lantern.search_media` before answering questions about Lantern media.
+- In Hermes tool-call form, `lantern.search_media` is exposed as
+  `mcp_lantern_lantern_search_media`.
+- Use `mcp_lantern_lantern_list_media` when the user asks what media/files are
+  available.
+- Use `mcp_lantern_lantern_get_media_context` when you need more context for an
+  opaque `media_id` returned by Lantern.
 - Treat results as redacted grounded context, not as raw files.
 - Never ask for, infer, print, or store raw Lantern file paths.
 - Never try to read Lantern databases, keychain secrets, or provider credentials.

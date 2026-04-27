@@ -79,6 +79,31 @@ def test_get_platform_tools_preserves_explicit_empty_selection():
     assert enabled == set()
 
 
+def test_lantern_managed_cli_allows_only_lantern_mcp(monkeypatch):
+    monkeypatch.setenv("HERMES_LANTERN_MANAGED", "1")
+    config = {
+        "platform_toolsets": {"cli": ["terminal", "file", "browser", "lantern"]},
+        "mcp_servers": {"lantern": {"url": "http://127.0.0.1:49152/mcp"}},
+    }
+
+    enabled = _get_platform_tools(config, "cli")
+
+    assert enabled == {"lantern"}
+
+
+def test_lantern_managed_save_blocks_local_toolsets(monkeypatch):
+    monkeypatch.setenv("HERMES_LANTERN_MANAGED", "1")
+    config = {
+        "platform_toolsets": {"cli": ["lantern"]},
+        "mcp_servers": {"lantern": {"url": "http://127.0.0.1:49152/mcp"}},
+    }
+
+    with patch("hermes_cli.tools_config.save_config"):
+        _save_platform_tools(config, "cli", {"terminal", "file", "browser", "lantern"})
+
+    assert config["platform_toolsets"]["cli"] == ["lantern"]
+
+
 def test_apply_toolset_change_from_default_does_not_enable_default_off_toolsets():
     """Disabling one default toolset on a fresh config must not persist
     default-off toolsets as explicitly enabled.

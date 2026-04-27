@@ -1,6 +1,9 @@
 """Tests that invalid context_length values in config produce visible warnings."""
 
+import sys
 from unittest.mock import patch, MagicMock, call
+
+sys.modules.setdefault("fire", MagicMock())
 
 
 def _build_agent(model_cfg, custom_providers=None, model="anthropic/claude-opus-4.6"):
@@ -11,9 +14,12 @@ def _build_agent(model_cfg, custom_providers=None, model="anthropic/claude-opus-
 
     base_url = model_cfg.get("base_url", "")
 
+    def context_length_side_effect(*_args, **kwargs):
+        return kwargs.get("config_context_length") or 128_000
+
     with (
         patch("hermes_cli.config.load_config", return_value=cfg),
-        patch("agent.model_metadata.get_model_context_length", return_value=128_000),
+        patch("agent.model_metadata.get_model_context_length", side_effect=context_length_side_effect),
         patch("run_agent.get_tool_definitions", return_value=[]),
         patch("run_agent.check_toolset_requirements", return_value={}),
         patch("run_agent.OpenAI"),
@@ -112,3 +118,25 @@ def test_custom_providers_valid_context_length():
         )
     for c in mock_logger.warning.call_args_list:
         assert "Invalid" not in str(c)
+
+
+def test_lantern_managed_allows_32k_context():
+    """Lantern owns routing/context policy, so its 32K local model is valid."""
+    with patch.dict(
+        "os.environ",
+        {
+            "HERMES_LANTERN_MANAGED": "1",
+            "LANTERN_BRIDGE_PORT": "49152",
+        },
+        clear=False,
+    ), patch.dict("sys.modules", {"fire": MagicMock()}):
+        agent = _build_agent(
+            {
+                "default": "lantern-auto",
+                "provider": "lantern",
+                "base_url": "http://127.0.0.1:49152/v1",
+                "context_length": 32768,
+            },
+            model="lantern-auto",
+        )
+    assert agent.context_compressor.context_length == 32768

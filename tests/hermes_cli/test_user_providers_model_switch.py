@@ -6,6 +6,7 @@ are exposed in the model picker.
 """
 
 import pytest
+from pathlib import Path
 from hermes_cli.model_switch import list_authenticated_providers, switch_model
 from hermes_cli import runtime_provider as rp
 
@@ -436,12 +437,21 @@ def test_get_named_custom_provider_finds_user_providers_by_key(monkeypatch, tmp_
 def test_get_named_custom_provider_resolves_lantern_profile_env(monkeypatch, tmp_path):
     """Lantern profile uses providers: dict + key_env + default_model."""
     config = {
+        "model": {
+            "default": "lantern-auto",
+            "provider": "lantern",
+            "base_url": "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1",
+            "api_mode": "chat_completions",
+        },
         "providers": {
             "lantern": {
+                "api": "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1",
                 "base_url": "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1",
                 "key_env": "LANTERN_BRIDGE_TOKEN",
                 "name": "Lantern Kernel Bridge",
+                "model": "lantern-auto",
                 "default_model": "lantern-auto",
+                "api_mode": "chat_completions",
             }
         }
     }
@@ -451,14 +461,102 @@ def test_get_named_custom_provider_resolves_lantern_profile_env(monkeypatch, tmp
     config_file.write_text(yaml.dump(config))
 
     monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("LANTERN_BRIDGE_PORT", "49152")
     monkeypatch.setenv("LANTERN_BRIDGE_TOKEN", "bridge-secret")
 
     result = rp._get_named_custom_provider("lantern")
 
     assert result is not None
-    assert result["base_url"] == "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1"
+    assert result["base_url"] == "http://127.0.0.1:49152/v1"
     assert result["api_key"] == "bridge-secret"
     assert result["model"] == "lantern-auto"
+    assert result["api_mode"] == "chat_completions"
+
+
+def test_resolve_provider_full_accepts_lantern_user_provider(monkeypatch, tmp_path):
+    """The Lantern profile must make `lantern` a first-class /provider choice."""
+    config = {
+        "model": {
+            "default": "lantern-auto",
+            "provider": "lantern",
+            "base_url": "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1",
+        },
+        "providers": {
+            "lantern": {
+                "name": "Lantern Kernel Bridge",
+                "api": "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1",
+                "key_env": "LANTERN_BRIDGE_TOKEN",
+                "model": "lantern-auto",
+                "api_mode": "chat_completions",
+            }
+        },
+    }
+
+    import yaml
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.dump(config))
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("LANTERN_BRIDGE_PORT", "49152")
+    monkeypatch.setenv("LANTERN_BRIDGE_TOKEN", "bridge-secret")
+
+    from hermes_cli.config import get_compatible_custom_providers, load_config
+    from hermes_cli.providers import resolve_provider_full
+
+    loaded = load_config()
+    provider = resolve_provider_full(
+        "lantern",
+        loaded.get("providers"),
+        get_compatible_custom_providers(loaded),
+    )
+
+    assert provider is not None
+    assert provider.id == "lantern"
+    assert provider.base_url == "http://127.0.0.1:49152/v1"
+
+
+def test_lantern_runtime_provider_uses_launch_env_not_credential_pool(monkeypatch, tmp_path):
+    """Lantern bridge tokens rotate per launch and must never come from pools."""
+    config = {
+        "model": {
+            "default": "lantern-auto",
+            "provider": "lantern",
+            "base_url": "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1",
+            "api_mode": "chat_completions",
+        },
+        "providers": {
+            "lantern": {
+                "name": "Lantern Kernel Bridge",
+                "api": "http://127.0.0.1:${LANTERN_BRIDGE_PORT}/v1",
+                "key_env": "LANTERN_BRIDGE_TOKEN",
+                "model": "lantern-auto",
+                "api_mode": "chat_completions",
+            }
+        },
+    }
+
+    import yaml
+    config_file = tmp_path / "config.yaml"
+    config_file.write_text(yaml.dump(config))
+
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path))
+    monkeypatch.setenv("HERMES_LANTERN_MANAGED", "1")
+    monkeypatch.setenv("LANTERN_BRIDGE_PORT", "49152")
+    monkeypatch.setenv("LANTERN_BRIDGE_TOKEN", "fresh-bridge-token")
+
+    def fail_pool(*_args, **_kwargs):
+        raise AssertionError("Lantern managed runtime must bypass credential pools")
+
+    monkeypatch.setattr(rp, "_try_resolve_from_custom_pool", fail_pool)
+
+    result = rp.resolve_runtime_provider(requested="lantern")
+
+    assert result["provider"] == "custom"
+    assert result["base_url"] == "http://127.0.0.1:49152/v1"
+    assert result["api_key"] == "fresh-bridge-token"
+    assert result["model"] == "lantern-auto"
+    assert result["api_mode"] == "chat_completions"
+    assert "credential_pool" not in result
 
 
 def test_get_named_custom_provider_finds_by_display_name(monkeypatch, tmp_path):
@@ -594,3 +692,21 @@ def test_switch_model_resolves_user_provider_credentials(monkeypatch, tmp_path):
     
     assert result.success is True
     assert result.error_message == ""
+
+
+def test_lantern_profile_primes_media_mcp_tool_use():
+    """Lantern-managed sessions must know that media access is through MCP tools."""
+    profile = (
+        Path(__file__).resolve().parents[2]
+        / "integrations"
+        / "lantern"
+        / "profile"
+        / "config.yaml"
+    )
+    body = profile.read_text()
+
+    assert "agent:" in body
+    assert "system_prompt:" in body
+    assert "mcp_lantern_lantern_search_media" in body
+    assert "mcp_lantern_lantern_list_media" in body
+    assert "Do not say you cannot access local files" in body
