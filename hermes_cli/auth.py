@@ -310,7 +310,7 @@ PROVIDER_REGISTRY: Dict[str, ProviderConfig] = {
         id="deepseek",
         name="DeepSeek",
         auth_type="api_key",
-        inference_base_url="https://api.deepseek.com/v1",
+        inference_base_url="https://api.deepseek.com",
         api_key_env_vars=("DEEPSEEK_API_KEY",),
         base_url_env_var="DEEPSEEK_BASE_URL",
     ),
